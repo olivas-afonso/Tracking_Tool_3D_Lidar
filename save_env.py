@@ -24,12 +24,18 @@ import numpy as np
 import sensor_msgs_py.point_cloud2 as pc2
 import open3d as o3d
 import os
+import sys
 
 rclpy.init()
 
+if len(sys.argv) > 1:
+    bag_path = sys.argv[1]
+else:
+    bag_path = './track_tools/test_06_23/env/rosbag2_2025_06_23-11_51_44'
+
 # Configurar leitura do bag
 reader = rosbag2_py.SequentialReader()
-storage_options = rosbag2_py.StorageOptions(uri='./track_tools/test_06_23/env/rosbag2_2025_06_23-11_51_44', storage_id='sqlite3')
+storage_options = rosbag2_py.StorageOptions(uri=bag_path, storage_id='sqlite3')
 converter_options = rosbag2_py.ConverterOptions('cdr', 'cdr')
 reader.open(storage_options, converter_options)
 reader.set_filter(rosbag2_py.StorageFilter(topics=['/pandar']))
@@ -70,3 +76,5 @@ o3d.io.write_point_cloud(os.path.join(output_dir, "background_full.pcd"), pcd)
 
 np.save(os.path.join(output_dir, "background_full.npy"), np.asarray(pcd.points))
 print(f"[✔] Ambiente salvo como 'background_full.pcd' e 'background_full.npy on {output_dir}'.")
+
+
