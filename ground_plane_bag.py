@@ -49,71 +49,98 @@ def load_point_cloud_from_bag(bag_path, topic, n_msgs):
 
 # Example usage:
 
-def compute_ground_plane_from_bag(bag_path,ws_folder=None, plot_flag=True, n_msgs=50):
-
-
-    # Load the background image (assumed to be a depth or point cloud map)
-    points= load_point_cloud_from_bag(bag_path, '/pandar', n_msgs=n_msgs)
-
-
-
-    background = points
-
-    # Example: Compute the ground plane using RANSAC (assuming background is Nx3 points)
-
-    # Assume background is (N, 3): x, y, z
-    X = background[:, :2]  # x, y
-    y = background[:, 2]   # z
-
-    # Fit plane: z = a*x + b*y + c
-    ransac = RANSACRegressor()
+def compute_ground_plane_from_bag(bag_path, ws_folder=None, plot_flag=True, n_msgs=50):
+    # Load and filter points
+    points = load_point_cloud_from_bag(bag_path, '/pandar', n_msgs=n_msgs)
+    
+    # Filter for likely ground points
+    z_min, z_max = -2.0, 2.0
+    height_mask = (points[:, 2] >= z_min) & (points[:, 2] <= z_max)
+    filtered_points = points[height_mask]
+    
+    # Remove points too close to origin (sensor noise)
+    distance = np.linalg.norm(filtered_points[:, :2], axis=1)
+    distance_mask = (distance > 1.0) & (distance < 50.0)
+    background = filtered_points[distance_mask]
+    
+    if len(background) < 100:
+        print("WARNING: Too few points for reliable plane fitting")
+        return np.array([0, 0, 0])
+    
+    # Fit plane with tuned RANSAC
+    X = background[:, :2]
+    y = background[:, 2]
+    
+    ransac = RANSACRegressor(
+        min_samples=3,
+        residual_threshold=0.03,  # Tighter threshold
+        max_trials=2000,
+        stop_probability=0.99,
+        random_state=42
+    )
+    
     ransac.fit(X, y)
     a, b = ransac.estimator_.coef_
     c = ransac.estimator_.intercept_
-
-    print(f"Ground plane equation: z = {a:.4f}*x + {b:.4f}*y + {c:.4f}")
-
-    # Save the ground plane coefficients to a file
     
+    # Calculate quality metrics
+    inlier_mask = ransac.inlier_mask_
+    inliers = background[inlier_mask]
+    predicted_z = ransac.predict(inliers[:, :2])
+    rmse = np.sqrt(np.mean((inliers[:, 2] - predicted_z)**2))
+    
+    print(f"RANSAC results:")
+    print(f"  Inliers: {np.sum(inlier_mask)}/{len(background)}")
+    print(f"  RMSE: {rmse:.4f} m")
+    print(f"  Plane: z = {a:.4f}*x + {b:.4f}*y + {c:.4f}")
+    
+    # Save coefficients
     filename = f"ground_plane_{'background_full'}.npy"
-    output_file=os.path.join(ws_folder, filename)
-    print(f"Saving ground plane coefficients to {output_file}")
+    output_file = os.path.join(ws_folder, filename)
     np.save(output_file, np.array([a, b, c]))
     
-    
     if plot_flag:
+        # Enhanced visualization
         import matplotlib.pyplot as plt
-
-        fig = plt.figure()
-        ax = fig.add_subplot(111, projection='3d')
-
-        # Plot the point cloud
-        ax.scatter(background[:, 0], background[:, 1], background[:, 2], s=1, c='b', label='Points')
-
-        # Create a meshgrid for the plane
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        xx, yy = np.meshgrid(
-            np.linspace(xlim[0], xlim[1], 10),
-            np.linspace(ylim[0], ylim[1], 10)
-        )
-        zz = a * xx + b * yy + c
-
-        # Plot the plane
-        ax.plot_surface(xx, yy, zz, alpha=0.5, color='r', label='Fitted Plane')
-
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        #plt.legend()
-        plt.show()
+        fig = plt.figure(figsize=(12, 5))
         
-    return  np.array([a, b, c])
+        # 3D plot
+        ax1 = fig.add_subplot(121, projection='3d')
+        ax1.scatter(background[:, 0], background[:, 1], background[:, 2], 
+                   s=1, c='blue', alpha=0.5, label='All points')
+        ax1.scatter(inliers[:, 0], inliers[:, 1], inliers[:, 2],
+                   s=2, c='green', alpha=0.7, label='Inliers')
+        
+        # Plot plane
+        xlim = ax1.get_xlim()
+        ylim = ax1.get_ylim()
+        xx, yy = np.meshgrid(np.linspace(xlim[0], xlim[1], 10),
+                            np.linspace(ylim[0], ylim[1], 10))
+        zz = a * xx + b * yy + c
+        ax1.plot_surface(xx, yy, zz, alpha=0.5, color='red')
+        
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+        ax1.set_zlabel('Z')
+        ax1.legend()
+        
+        # 2D residual plot
+        ax2 = fig.add_subplot(122)
+        residuals = inliers[:, 2] - predicted_z
+        ax2.hist(residuals, bins=50, alpha=0.7)
+        ax2.set_xlabel('Residual (m)')
+        ax2.set_ylabel('Count')
+        ax2.set_title(f'Residual Distribution (RMSE: {rmse:.3f}m)')
+        
+        plt.tight_layout()
+        plt.show()
+    
+    return np.array([a, b, c])
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python ground_plane_bag.py <bag_path>")
-        bag_path = "track_tools/test_06_23/test_12_08/rosbag2_2025_06_23-12_08_31_lidar"
+        bag_path = "/home/olivas/camera_ws/bags/rosbag2_2025_09_16-11_50_59"
 
         #sys.exit(1)
     else:

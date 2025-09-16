@@ -31,7 +31,7 @@ rclpy.init()
 if len(sys.argv) > 1:
     bag_path = sys.argv[1]
 else:
-    bag_path = './track_tools/test_06_23/env/rosbag2_2025_06_23-11_51_44'
+    bag_path = '/home/olivas/camera_ws/bags/rosbag2_2025_09_16-11_47_18'
 
 # Configurar leitura do bag
 reader = rosbag2_py.SequentialReader()
@@ -65,6 +65,7 @@ print(f"[✔] Total de {background.shape[0]} pontos acumulados.")
 
 # Converter para nuvem Open3D
 pcd = o3d.geometry.PointCloud()
+xyz_array = np.ascontiguousarray(xyz_array, dtype=np.float64)
 pcd.points = o3d.utility.Vector3dVector(xyz_array)
 
 # (Opcional) Aplicar voxel downsampling para reduzir densidade

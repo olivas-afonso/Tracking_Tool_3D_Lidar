@@ -40,7 +40,7 @@ class BackgroundSubtractor(Node):
         super().__init__('background_subtractor')
 
         self.get_logger().info("A carregar ambiente de fundo...")
-        self.bg = np.load('./track_tools/test_06_23/env/background_full.npy')
+        self.bg = np.load('/home/olivas/camera_ws/bags/background_full.npy')
 
         if self.bg.dtype.names:
             self.bg = np.stack([self.bg['x'], self.bg['y'], self.bg['z']], axis=-1)

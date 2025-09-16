@@ -24,7 +24,7 @@ Dependencies:
     numpy, matplotlib, scipy, rclpy, rosbag2_py, transforms3d, ground_plane_bag
 """
 
-
+import os
 import numpy as np
 import rclpy
 from rclpy.serialization import deserialize_message
@@ -53,6 +53,7 @@ def extract_odom_from_rosbag(bag_path, topic_name="/moving_objects_odom", ground
     msg_type = get_message(type_map[topic_name])
 
     odom_data = []
+    timestamps = []  
     
     start_pose = None
 
@@ -176,42 +177,60 @@ def extract_odom_from_rosbag(bag_path, topic_name="/moving_objects_odom", ground
                 q_rel[2],
                 q_rel[3]
             ])
+            timestamps.append(t) 
+        
     
     import matplotlib.pyplot as plt
 
+    # NEW FILTERING CODE (REPLACE THE ABOVE SECTION):
     odom_data_np = np.array(odom_data)
-    # Calcula a derivada de z em relação ao tempo (assumindo timestamps uniformemente espaçados)
-    dz_dt = get_derivative(odom_data_np[:, 2], dt=1.0)  # Assuming uniform time intervals of 1 second
-    dy_dt = get_derivative(odom_data_np[:, 1], dt=1.0)  # Assuming uniform time intervals of 1 second
-    dx_dt = get_derivative(odom_data_np[:, 0], dt=1.0)  # Assuming uniform time intervals of 1 second
 
+    # Store timestamps for proper derivative calculation
+    #timestamps = []  # You'll need to collect timestamps in the main loop
+    # Add this line inside your while loop where you process messages:
+    # timestamps.append(t)  # Add this after line where you append to odom_data
 
-    
-    # Remove points where |dz/dt| > 0.1 (considered errors)
-    mask = np.abs(dz_dt) <= 0.1
-    # Also remove points where |dy/dt| > 0.1 and |dx/dt| > 0.1
-    mask &= np.abs(dy_dt) <= 0.5
-    mask &= np.abs(dx_dt) <= 0.5
-    # Since dz_dt has length N-1, mask needs to be mapped to odom_data_np indices
-    # We'll remove the point after the jump (i+1)
-    valid_indices = np.insert(mask, 0, True)  # Always keep the first point
-    odom_data_np = odom_data_np[valid_indices]
+    # For now, if you don't have timestamps, we'll use index-based filtering
+    # Calculate derivatives with proper indexing
+    dz_dt = np.abs(np.diff(odom_data_np[:, 2]))
+    dy_dt = np.abs(np.diff(odom_data_np[:, 1]))
+    dx_dt = np.abs(np.diff(odom_data_np[:, 0]))
+
+    # Create mask for valid points
+    mask = np.ones(len(odom_data_np), dtype=bool)
+
+    # Mark points where derivatives exceed thresholds (starting from index 1)
+    for i in range(1, len(odom_data_np)):
+        if i-1 < len(dz_dt):  # Ensure we don't go out of bounds
+            if (dz_dt[i-1] > 0.1 or dy_dt[i-1] > 0.5 or dx_dt[i-1] > 0.5):
+                mask[i] = False
+
+    # Apply the mask
+    # Apply the mask
+    odom_data_np = odom_data_np[mask]
+
+    print(f"[INFO] Filtered {np.sum(~mask)}/{len(odom_data)} points due to high velocity")
+
     # Inverte o eixo Y
     odom_data_np[:, 1] = -odom_data_np[:, 1]
-    
-    dz_dt = dz_dt[mask]
-    deriv_time = np.arange(1, len(dy_dt) + 1)  # Time indices for the derivative plot)
+
+    # Calculate new derivatives for plotting (after filtering)
+    dz_dt_filtered = np.abs(np.diff(odom_data_np[:, 2]))
+    dy_dt_filtered = np.abs(np.diff(odom_data_np[:, 1])) 
+    dx_dt_filtered = np.abs(np.diff(odom_data_np[:, 0]))
+
+    deriv_time = np.arange(1, len(dz_dt_filtered) + 1)  # Time indices for the derivative plot
 
     plt.figure(figsize=(8, 5))
-    plt.plot(deriv_time, dx_dt, label="dz/dt")
-    plt.title("Derivada de z entre pontos consecutivos")
+    plt.plot(deriv_time, dx_dt_filtered, label="dz/dt")
+    plt.title("Derivada de z entre pontos consecutivos (após filtro)")
     plt.xlabel("Índice da amostra")
     plt.ylabel("dz/dt (metros por amostra)")
     plt.grid(True)
     plt.legend()
     plt.tight_layout()
     plt.show()
-    
+        
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111, projection='3d')
     ax.plot(odom_data_np[:, 0], odom_data_np[:, 1], odom_data_np[:, 2], label='Trajectory')
@@ -355,7 +374,7 @@ if __name__ == "__main__":
     import os
     if len(sys.argv) < 2:
         print("Uso: python lidar_odom.py /caminho/para/rosbag ")
-        bag_path = "track_tools/test_06_23/test_12_08/rosbag2_2025_06_23-12_08_31_lidar"
+        bag_path = "/home/olivas/camera_ws/bags/rosbag2_2025_09_16-11_50_59"
     else:
         bag_path = sys.argv[1]
         
@@ -368,7 +387,17 @@ if __name__ == "__main__":
     ws_folder = hesai_odom_dir  # Use this as output folder for plots and npy
     print(f"[INFO] Criando diretório de saída: {hesai_odom_dir}")
     
-    ground_plane = compute_ground_plane_from_bag(bag_path, ws_folder, plot_flag=False, n_msgs=100)
+
+    ground_plane_file = "/home/olivas/camera_ws/src/Tracking_Tool_3D_Lidar/ground_plane_background_full.npy"
+    #ground_plane_file = "/home/olivas/camera_ws/src/Tracking_Tool_3D_Lidar/ground_plane_enhanced.npy"
+
+    if os.path.exists(ground_plane_file):
+        ground_plane = np.load(ground_plane_file)
+        print(f"[INFO] Loaded ground plane from '{ground_plane_file}': {ground_plane}")
+    else:
+        print(f"[ERROR] Ground plane file not found: {ground_plane_file}")
+        exit(1)
+
     
     # Get the first folder in the bag_path (relative to current directory)
     
